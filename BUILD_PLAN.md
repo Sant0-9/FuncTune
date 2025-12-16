@@ -9,10 +9,16 @@ A math-first audio engine where users type mathematical equations and hear them 
 - [x] Real-time math expression evaluation
 - [x] Variable sliders (a, b, c, d, freq)
 - [x] Waveform visualizer with gradient fill
+- [x] Spectrum analyzer view + waveform zoom
 - [x] Master volume control
 - [x] Play/Stop transport
 - [x] Safety limiter (prevents ear damage)
 - [x] Scroll wheel support on knobs/sliders
+- [x] Keyboard shortcuts (Space, +/-)
+- [x] Copy/Duplicate equation actions
+- [x] Reset variables button
+- [x] URL sharing (base64url)
+- [x] Preset system (factory + local presets)
 - [x] Cyberpunk UI theme
 
 ---
@@ -20,28 +26,28 @@ A math-first audio engine where users type mathematical equations and hear them 
 ## Phase 1: Core Improvements (High Priority)
 
 ### 1.1 Formula Error Feedback
-- [ ] Show syntax errors inline below equation input
-- [ ] Highlight invalid formulas in red
-- [ ] Display error message (e.g., "Unknown function: siin")
-- [ ] Preview computed value at t=0
+- [x] Show syntax errors inline below equation input
+- [x] Highlight invalid formulas in red
+- [x] Display error message (e.g., "Unknown function: siin")
+- [x] Preview computed value at t=0
 
 ### 1.2 URL Sharing
-- [ ] Encode equations + variables in URL
-- [ ] Share button that copies URL to clipboard
-- [ ] Load state from URL on page load
-- [ ] Compact encoding (base64 or custom)
+- [x] Encode equations + variables in URL
+- [x] Share button that copies URL to clipboard
+- [x] Load state from URL on page load
+- [x] Compact encoding (base64 or custom)
 
 ### 1.3 Preset System
-- [ ] Built-in preset library (Bass, Pad, Lead, FX, etc.)
-- [ ] Each preset = set of equations + variable values
-- [ ] Quick-load dropdown
-- [ ] User can save current state as preset (localStorage)
+- [x] Built-in preset library (Bass, Pad, Lead, FX, etc.)
+- [x] Each preset = set of equations + variable values
+- [x] Quick-load dropdown
+- [x] User can save current state as preset (localStorage)
 
 ### 1.4 Better Visualizer
-- [ ] Toggle between waveform / spectrum analyzer
-- [ ] Frequency spectrum (FFT) view
+- [x] Toggle between waveform / spectrum analyzer
+- [x] Frequency spectrum (FFT) view
 - [ ] Phase scope option
-- [ ] Zoom controls for waveform
+- [x] Zoom controls for waveform
 
 ---
 
@@ -145,13 +151,13 @@ A math-first audio engine where users type mathematical equations and hear them 
 
 ## Quick Wins (Can Do Now)
 
-1. **Copy equation button** - Copy formula to clipboard
-2. **Duplicate equation** - Clone an existing equation
-3. **Reset variables** - Button to reset all to defaults
+1. **Copy equation button** - Done (copy formula to clipboard)
+2. **Duplicate equation** - Done (clone an existing equation)
+3. **Reset variables** - Done (reset all to defaults)
 4. **Mute individual equations** - Already have toggle, ensure volume=0 works
 5. **Randomize** - Random equation generator for exploration
 6. **Formula autocomplete** - Dropdown suggestions while typing
-7. **Keyboard shortcuts** - Space=play/stop, +/- for volume
+7. **Keyboard shortcuts** - Done (Space=play/stop, +/- for volume)
 
 ---
 
@@ -178,10 +184,10 @@ src/
     sequencerStore.ts  # Sequencer state
   utils/
     mathParser.ts      # Safer expression parser
-    urlCodec.ts        # URL encode/decode
+    urlCodec.ts        # URL encode/decode (done)
     audioExport.ts     # WAV export
   presets/
-    factory.ts         # Built-in presets
+    factory.ts         # Built-in presets (done)
 ```
 
 ---
