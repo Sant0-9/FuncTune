@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
-import { useSynthStore } from './store/synthStore';
+import { useSynthStore, type Equation, type Variable } from './store/synthStore';
 import { Knob } from './components/Knob';
 import { Visualizer } from './components/Visualizer';
 import { HudPanel, InitButton } from './components/HudFrame';
 import { EquationRow, AddEquationButton } from './components/EquationRow';
 import { VariableSlider } from './components/VariableSlider';
 import { decodeShareState, encodeShareState } from './utils/urlCodec';
+import type { ShareableStateV1 } from './utils/urlCodec';
+import { factoryPresets } from './presets/factory';
+import { createUserPresetId, loadUserPresets, saveUserPresets, type UserPreset } from './utils/userPresets';
 import './index.css';
 
 function App() {
@@ -23,15 +26,23 @@ function App() {
     setEquationFormula,
     updateEquation,
     toggleEquation,
+    duplicateEquation,
     setVariable,
+    resetVariables,
     cleanup,
   } = useSynthStore();
 
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [userPresets, setUserPresets] = useState<UserPreset[]>([]);
+  const [selectedPresetKey, setSelectedPresetKey] = useState<string>('');
 
   useEffect(() => {
     return () => cleanup();
   }, [cleanup]);
+
+  useEffect(() => {
+    setUserPresets(loadUserPresets());
+  }, []);
 
   // Load state from URL (share link)
   useEffect(() => {
@@ -47,8 +58,130 @@ function App() {
     if (typeof decoded.masterVolume === 'number') setMasterVolume(decoded.masterVolume);
   }, []);
 
+  // Keyboard shortcuts (when not typing): Space=play/stop, +/- master volume
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isTyping =
+        !!target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          (target as HTMLElement).isContentEditable);
+      if (isTyping) return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (isInitialized) setPlaying(!isPlaying);
+      }
+
+      if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        setMasterVolume(Math.min(1, masterVolume + 0.05));
+      }
+
+      if (e.key === '-' || e.key === '_') {
+        e.preventDefault();
+        setMasterVolume(Math.max(0, masterVolume - 0.05));
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isInitialized, isPlaying, masterVolume, setMasterVolume, setPlaying]);
+
   const handleInitialize = async () => {
     await initializeAudio();
+  };
+
+  const applyEngineState = (
+    nextEquations: Array<Partial<Equation>>,
+    nextVariables: Array<Partial<Variable>>,
+    nextMasterVolume?: number
+  ) => {
+    const { loadState, setMasterVolume } = useSynthStore.getState();
+    loadState(nextEquations, nextVariables);
+    if (typeof nextMasterVolume === 'number') setMasterVolume(nextMasterVolume);
+  };
+
+  const handlePresetChange = (key: string) => {
+    setSelectedPresetKey(key);
+    if (!key) return;
+
+    if (key.startsWith('factory:')) {
+      const id = key.slice('factory:'.length);
+      const preset = factoryPresets.find((p) => p.id === id);
+      if (!preset) return;
+      applyEngineState(preset.state.equations, preset.state.variables, preset.state.masterVolume);
+      return;
+    }
+
+    if (key.startsWith('user:')) {
+      const id = key.slice('user:'.length);
+      const preset = userPresets.find((p) => p.id === id);
+      if (!preset) return;
+      applyEngineState(preset.state.equations, preset.state.variables, preset.state.masterVolume);
+    }
+  };
+
+  const handleSavePreset = () => {
+    const name = window.prompt('Preset name?');
+    const trimmed = name?.trim();
+    if (!trimmed) return;
+
+    const shareable = useSynthStore.getState().getShareableState();
+    const state: ShareableStateV1 = {
+      v: 1,
+      equations: shareable.equations,
+      variables: shareable.variables,
+      masterVolume: useSynthStore.getState().masterVolume,
+      mixMode: useSynthStore.getState().mixMode,
+    };
+
+    const preset: UserPreset = {
+      id: createUserPresetId(),
+      name: trimmed.toUpperCase(),
+      createdAt: Date.now(),
+      state,
+    };
+
+    const next = [preset, ...userPresets];
+    setUserPresets(next);
+    saveUserPresets(next);
+    setSelectedPresetKey(`user:${preset.id}`);
+  };
+
+  const handleDeleteSelectedPreset = () => {
+    if (!selectedPresetKey.startsWith('user:')) return;
+    const id = selectedPresetKey.slice('user:'.length);
+    const preset = userPresets.find((p) => p.id === id);
+    if (!preset) return;
+
+    const ok = window.confirm(`Delete preset "${preset.name}"?`);
+    if (!ok) return;
+
+    const next = userPresets.filter((p) => p.id !== id);
+    setUserPresets(next);
+    saveUserPresets(next);
+    setSelectedPresetKey('');
+  };
+
+  const handleCopyFormula = async (formula: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(formula);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = formula;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+    } catch {
+      // ignore
+    }
   };
 
   const handleShare = async () => {
@@ -189,6 +322,8 @@ function App() {
                     onVolumeChange={(volume) => updateEquation(eq.id, { volume })}
                     onToggle={() => toggleEquation(eq.id)}
                     onRemove={() => removeEquation(eq.id)}
+                    onDuplicate={() => duplicateEquation(eq.id)}
+                    onCopy={() => handleCopyFormula(eq.formula)}
                     canRemove={equations.length > 1}
                   />
                 ))}
@@ -244,9 +379,91 @@ function App() {
           <div className="w-1/3 flex flex-col">
             {/* Variables */}
             <div className="flex-1 overflow-auto p-4">
-              <h2 className="text-sm font-mono uppercase tracking-wider mb-4" style={{ color: '#555' }}>
-                Variables
-              </h2>
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-sm font-mono uppercase tracking-wider" style={{ color: '#555' }}>
+                  Variables
+                </h2>
+                <button
+                  onClick={resetVariables}
+                  className="px-3 py-1 font-mono text-xs uppercase tracking-wider rounded transition-all"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid #333',
+                    color: '#666',
+                  }}
+                  title="Reset variables to defaults"
+                >
+                  RESET
+                </button>
+              </div>
+
+              {/* Presets */}
+              <div className="mb-4 p-3 rounded" style={{ background: '#111', border: '1px solid #2a2a2a' }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-mono uppercase tracking-wider" style={{ color: '#555' }}>
+                    Presets
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleSavePreset}
+                      className="px-3 py-1 font-mono text-xs uppercase tracking-wider rounded transition-all"
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid #333',
+                        color: '#00ff88',
+                      }}
+                      title="Save current state as preset"
+                    >
+                      SAVE
+                    </button>
+                    <button
+                      onClick={handleDeleteSelectedPreset}
+                      disabled={!selectedPresetKey.startsWith('user:')}
+                      className="px-3 py-1 font-mono text-xs uppercase tracking-wider rounded transition-all"
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid #333',
+                        color: selectedPresetKey.startsWith('user:') ? '#ff4444' : '#333',
+                        cursor: selectedPresetKey.startsWith('user:') ? 'pointer' : 'not-allowed',
+                      }}
+                      title="Delete selected preset"
+                    >
+                      DEL
+                    </button>
+                  </div>
+                </div>
+
+                <select
+                  value={selectedPresetKey}
+                  onChange={(e) => handlePresetChange(e.target.value)}
+                  className="w-full px-3 py-2 rounded font-mono text-xs outline-none"
+                  style={{
+                    background: '#0a0a0a',
+                    border: '1px solid #333',
+                    color: '#e0e0e0',
+                  }}
+                >
+                  <option value="">-- Select --</option>
+                  <optgroup label="Factory">
+                    {factoryPresets.map((p) => (
+                      <option key={p.id} value={`factory:${p.id}`}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Saved">
+                    {userPresets.map((p) => (
+                      <option key={p.id} value={`user:${p.id}`}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+
+                <div className="mt-2 text-[10px] font-mono" style={{ color: '#555' }}>
+                  Space: Play/Stop · +/-: Volume
+                </div>
+              </div>
 
               <div className="space-y-4">
                 {variables.map((v) => (
