@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSynthStore } from './store/synthStore';
 import { Knob } from './components/Knob';
 import { Visualizer } from './components/Visualizer';
 import { HudPanel, InitButton } from './components/HudFrame';
 import { EquationRow, AddEquationButton } from './components/EquationRow';
 import { VariableSlider } from './components/VariableSlider';
+import { decodeShareState, encodeShareState } from './utils/urlCodec';
 import './index.css';
 
 function App() {
@@ -26,12 +27,67 @@ function App() {
     cleanup,
   } = useSynthStore();
 
+  const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+
   useEffect(() => {
     return () => cleanup();
   }, [cleanup]);
 
+  // Load state from URL (share link)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const encoded = params.get('s');
+    if (!encoded) return;
+
+    const decoded = decodeShareState(encoded);
+    if (!decoded) return;
+
+    const { loadState, setMasterVolume } = useSynthStore.getState();
+    loadState(decoded.equations, decoded.variables);
+    if (typeof decoded.masterVolume === 'number') setMasterVolume(decoded.masterVolume);
+  }, []);
+
   const handleInitialize = async () => {
     await initializeAudio();
+  };
+
+  const handleShare = async () => {
+    try {
+      const shareable = useSynthStore.getState().getShareableState();
+      const url = new URL(window.location.href);
+      url.searchParams.set(
+        's',
+        encodeShareState({
+          v: 1,
+          equations: shareable.equations,
+          variables: shareable.variables,
+          masterVolume: useSynthStore.getState().masterVolume,
+          mixMode: useSynthStore.getState().mixMode,
+        })
+      );
+
+      const shareUrl = url.toString();
+      window.history.replaceState({}, '', shareUrl);
+
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = shareUrl;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+
+      setShareStatus('copied');
+      window.setTimeout(() => setShareStatus('idle'), 1200);
+    } catch {
+      setShareStatus('error');
+      window.setTimeout(() => setShareStatus('idle'), 1200);
+    }
   };
 
   return (
@@ -57,6 +113,25 @@ function App() {
 
         {/* Controls */}
         <div className="flex items-center gap-4">
+          {/* Share */}
+          <button
+            onClick={handleShare}
+            className="px-4 py-2 font-mono text-sm uppercase tracking-wider rounded transition-all"
+            style={{
+              background: shareStatus === 'copied' ? '#001a0d' : '#1a1a1a',
+              border: `1px solid ${shareStatus === 'copied' ? '#00ff88' : '#333'}`,
+              color:
+                shareStatus === 'copied'
+                  ? '#00ff88'
+                  : shareStatus === 'error'
+                    ? '#ff4444'
+                    : '#666',
+            }}
+            title="Copy share URL"
+          >
+            {shareStatus === 'copied' ? 'COPIED' : shareStatus === 'error' ? 'ERROR' : 'SHARE'}
+          </button>
+
           {/* Play/Stop */}
           <button
             onClick={() => setPlaying(!isPlaying)}

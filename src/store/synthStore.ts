@@ -79,7 +79,7 @@ interface SynthState {
   resetVariables: () => void;
 
   // State management
-  loadState: (equations: Equation[], variables: Variable[]) => void;
+  loadState: (equations: Array<Partial<Equation>>, variables: Array<Partial<Variable>>) => void;
   getShareableState: () => { equations: Equation[]; variables: Variable[] };
 
   // Sync to audio
@@ -87,6 +87,85 @@ interface SynthState {
 }
 
 let equationCounter = 2;
+
+const cloneVariables = (vars: Variable[]) => vars.map((v) => ({ ...v }));
+const cloneEquations = (eqs: Equation[]) => eqs.map((eq) => ({ ...eq }));
+
+const normalizeLoadedVariables = (vars: Array<Partial<Variable>>): Variable[] => {
+  const defaultsByName = new Map(defaultVariables.map((v) => [v.name, v]));
+  const loadedByName = new Map<string, Partial<Variable>>();
+  for (const v of vars) {
+    if (typeof v.name === 'string') loadedByName.set(v.name, v);
+  }
+
+  const merged: Variable[] = [];
+  for (const [name, def] of defaultsByName.entries()) {
+    const loaded = loadedByName.get(name);
+    merged.push({
+      ...def,
+      value: typeof loaded?.value === 'number' && isFinite(loaded.value) ? loaded.value : def.value,
+      min: typeof loaded?.min === 'number' && isFinite(loaded.min) ? loaded.min : def.min,
+      max: typeof loaded?.max === 'number' && isFinite(loaded.max) ? loaded.max : def.max,
+      step: typeof loaded?.step === 'number' && isFinite(loaded.step) ? loaded.step : def.step,
+    });
+  }
+
+  // Preserve any unknown variables from loaded state (for forwards-compat)
+  for (const v of vars) {
+    if (typeof v.name !== 'string') continue;
+    if (defaultsByName.has(v.name)) continue;
+
+    merged.push({
+      name: v.name,
+      value: typeof v.value === 'number' && isFinite(v.value) ? v.value : 0,
+      min: typeof v.min === 'number' && isFinite(v.min) ? v.min : 0,
+      max: typeof v.max === 'number' && isFinite(v.max) ? v.max : 1,
+      step: typeof v.step === 'number' && isFinite(v.step) ? v.step : 0.01,
+    });
+  }
+
+  return merged;
+};
+
+const normalizeLoadedEquations = (eqs: Array<Partial<Equation>>): Equation[] => {
+  const sanitized: Equation[] = [];
+  const usedIds = new Set<string>();
+  let nextId = 1;
+
+  for (const eq of eqs) {
+    if (!eq || typeof eq.formula !== 'string') continue;
+
+    let id = typeof eq.id === 'string' ? eq.id : '';
+    if (!id || usedIds.has(id)) {
+      while (usedIds.has(String(nextId))) nextId += 1;
+      id = String(nextId++);
+    }
+    usedIds.add(id);
+
+    const volume = typeof eq.volume === 'number' && isFinite(eq.volume) ? Math.max(0, Math.min(1, eq.volume)) : 0.5;
+    const enabled = typeof eq.enabled === 'boolean' ? eq.enabled : true;
+    const color = typeof eq.color === 'string' && eq.color.trim() ? eq.color : equationColors[(Number(id) - 1) % equationColors.length] || '#00ff88';
+
+    sanitized.push({
+      id,
+      formula: eq.formula,
+      enabled,
+      volume,
+      color,
+    });
+  }
+
+  return sanitized.length > 0 ? sanitized : cloneEquations(defaultEquations);
+};
+
+const bumpEquationCounter = (eqs: Equation[]) => {
+  const numericIds = eqs
+    .map((eq) => Number(eq.id))
+    .filter((n) => Number.isFinite(n));
+
+  const maxId = numericIds.length > 0 ? Math.max(...numericIds) : eqs.length;
+  equationCounter = Math.max(2, maxId + 1);
+};
 
 export const useSynthStore = create<SynthState>((set, get) => ({
   isInitialized: false,
@@ -191,8 +270,8 @@ export const useSynthStore = create<SynthState>((set, get) => ({
   },
 
   addEquation: () => {
-    const id = String(equationCounter++);
     const colorIndex = (equationCounter - 1) % equationColors.length;
+    const id = String(equationCounter++);
 
     const newEquation: Equation = {
       id,
@@ -248,8 +327,8 @@ export const useSynthStore = create<SynthState>((set, get) => ({
     const original = state.equations.find((eq) => eq.id === id);
     if (!original) return;
 
-    const newId = String(equationCounter++);
     const colorIndex = (equationCounter - 1) % equationColors.length;
+    const newId = String(equationCounter++);
 
     const newEquation: Equation = {
       id: newId,
@@ -281,6 +360,32 @@ export const useSynthStore = create<SynthState>((set, get) => ({
         v.name === name ? { ...v, min, max } : v
       ),
     }));
+  },
+
+  resetVariables: () => {
+    set({ variables: cloneVariables(defaultVariables) });
+    get().syncToAudio();
+  },
+
+  loadState: (equations, variables) => {
+    const nextEquations = normalizeLoadedEquations(equations);
+    const nextVariables = normalizeLoadedVariables(variables);
+    bumpEquationCounter(nextEquations);
+
+    set({
+      equations: nextEquations,
+      variables: nextVariables,
+    });
+
+    get().syncToAudio();
+  },
+
+  getShareableState: () => {
+    const { equations, variables } = get();
+    return {
+      equations: cloneEquations(equations),
+      variables: cloneVariables(variables),
+    };
   },
 
   syncToAudio: () => {
